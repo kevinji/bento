@@ -1,4 +1,3 @@
-use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -18,8 +17,10 @@ async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     setup_tracing()?;
 
-    let args = crabcan::Args::try_parse()?;
+    let args = crabcan::Args::try_parse_and_validate().await?;
+
     debug!("{:?}", args);
+    crabcan::start(args)?;
 
     Ok(())
 }
