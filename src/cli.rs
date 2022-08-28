@@ -18,6 +18,9 @@ pub struct Args {
 }
 
 impl Args {
+    /// # Errors
+    ///
+    /// Returns an error if parsing `Args` fails, or if `mount_dir` is not a directory.
     pub async fn try_parse_and_validate() -> eyre::Result<Self> {
         let args = Args::try_parse()?;
         ensure!(

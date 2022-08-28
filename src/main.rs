@@ -3,7 +3,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn setup_tracing() -> eyre::Result<()> {
     tracing_subscriber::registry()
-        .with(console_subscriber::spawn())
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_error::ErrorLayer::default())
