@@ -16,10 +16,10 @@ async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     setup_tracing()?;
 
-    let args = crabcan::Args::try_parse_and_validate().await?;
+    let args = bento::Args::try_parse_and_validate().await?;
 
     debug!("{:?}", args);
-    crabcan::start(args)?;
+    bento::start(args)?;
 
     Ok(())
 }
