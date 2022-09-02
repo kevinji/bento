@@ -1,10 +1,11 @@
+use nix::unistd::Uid;
 use std::{ffi::CString, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub(super) struct ContainerConfig {
     pub path: CString,
     pub argv: Vec<CString>,
-    pub uid: u32,
+    pub uid: Uid,
     pub mount_dir: PathBuf,
 }
 
@@ -19,6 +20,7 @@ impl ContainerConfig {
             .map(CString::new)
             .collect::<Result<Vec<_>, _>>()?;
         let path = argv[0].clone();
+        let uid = Uid::from_raw(uid);
 
         Ok(Self {
             path,
