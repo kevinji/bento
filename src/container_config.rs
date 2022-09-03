@@ -7,6 +7,7 @@ pub(super) struct ContainerConfig {
     pub argv: Vec<CString>,
     pub uid: Uid,
     pub mount_dir: PathBuf,
+    pub hostname: Option<String>,
 }
 
 impl ContainerConfig {
@@ -14,6 +15,7 @@ impl ContainerConfig {
         command: &str,
         uid: u32,
         mount_dir: PathBuf,
+        hostname: Option<String>,
     ) -> eyre::Result<ContainerConfig> {
         let argv = command
             .split_ascii_whitespace()
@@ -27,6 +29,7 @@ impl ContainerConfig {
             argv,
             uid,
             mount_dir,
+            hostname,
         })
     }
 }

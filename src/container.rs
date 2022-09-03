@@ -11,8 +11,13 @@ pub(super) struct Container {
 }
 
 impl Container {
-    pub(super) fn new(command: &str, uid: u32, mount_dir: PathBuf) -> eyre::Result<Self> {
-        let config = ContainerConfig::new(command, uid, mount_dir)?;
+    pub(super) fn new(
+        command: &str,
+        uid: u32,
+        mount_dir: PathBuf,
+        hostname: Option<String>,
+    ) -> eyre::Result<Self> {
+        let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
         let socketpair = ipc::create_socketpair()?;
 
         Ok(Self {
@@ -50,9 +55,10 @@ pub fn start(
         command,
         uid,
         mount_dir,
+        hostname,
     }: Args,
 ) -> eyre::Result<()> {
-    let mut container = Container::new(&command, uid, mount_dir)?;
+    let mut container = Container::new(&command, uid, mount_dir, hostname)?;
     if let Err(err) = container.create() {
         debug!("Error creating container: {err}");
 

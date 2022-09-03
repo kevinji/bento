@@ -11,12 +11,11 @@ fn setup_tracing() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
+fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     setup_tracing()?;
 
-    let args = bento::Args::try_parse_and_validate().await?;
+    let args = bento::Args::try_parse_and_validate()?;
 
     debug!("{:?}", args);
     bento::start(args)?;

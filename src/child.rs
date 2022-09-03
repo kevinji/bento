@@ -3,7 +3,7 @@ use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::{clone, CloneFlags},
     sys::signal::Signal,
-    unistd::{chdir, execve, pivot_root, Pid},
+    unistd::{chdir, execve, pivot_root, sethostname, Pid},
 };
 use std::{
     convert::Infallible,
@@ -11,7 +11,7 @@ use std::{
     os::unix::{io::RawFd, net::UnixDatagram, prelude::FromRawFd},
     path::PathBuf,
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 const STACK_SIZE: usize = 1024 * 1024;
 
@@ -53,9 +53,15 @@ fn spawn_with_result(
         argv,
         uid,
         mount_dir,
+        hostname,
     }: ContainerConfig,
     fd: RawFd,
 ) -> eyre::Result<Infallible> {
+    if let Some(hostname) = hostname {
+        sethostname(&hostname)?;
+        debug!("Hostname is now {hostname}");
+    }
+
     info!(
         "Running command {} with args {:?}",
         path.to_str().expect("Command must be valid UTF-8"),
