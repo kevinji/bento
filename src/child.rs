@@ -3,53 +3,71 @@ use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::{clone, CloneFlags},
     sys::signal::Signal,
-    unistd::{chdir, pivot_root, Pid},
+    unistd::{chdir, execve, pivot_root, Pid},
 };
 use std::{
+    convert::Infallible,
+    ffi::CString,
     os::unix::{io::RawFd, net::UnixDatagram, prelude::FromRawFd},
     path::PathBuf,
 };
-use tracing::info;
+use tracing::{error, info};
 
 const STACK_SIZE: usize = 1024 * 1024;
 
 pub(super) fn clone_process(config: &ContainerConfig, fd: RawFd) -> eyre::Result<Pid> {
     let mut stack = [0; STACK_SIZE];
 
-    let mut flags = CloneFlags::empty();
-    flags.insert(CloneFlags::CLONE_FILES); // TODO: Is this needed?
-    flags.insert(CloneFlags::CLONE_NEWCGROUP);
-    flags.insert(CloneFlags::CLONE_NEWIPC);
-    flags.insert(CloneFlags::CLONE_NEWNET);
-    flags.insert(CloneFlags::CLONE_NEWNS);
-    flags.insert(CloneFlags::CLONE_NEWUSER);
-    flags.insert(CloneFlags::CLONE_NEWPID);
-    flags.insert(CloneFlags::CLONE_NEWUTS);
+    let flags = CloneFlags::from_iter([
+        CloneFlags::CLONE_FILES, // TODO: Is this needed?
+        CloneFlags::CLONE_NEWCGROUP,
+        CloneFlags::CLONE_NEWIPC,
+        CloneFlags::CLONE_NEWNET,
+        CloneFlags::CLONE_NEWNS,
+        CloneFlags::CLONE_NEWUSER,
+        CloneFlags::CLONE_NEWPID,
+        CloneFlags::CLONE_NEWUTS,
+    ]);
 
     Ok(clone(
-        Box::new(|| create(config.clone(), fd)),
+        Box::new(|| spawn(config.clone(), fd)),
         &mut stack,
         flags,
         Some(Signal::SIGCHLD as i32),
     )?)
 }
 
-fn create(config: ContainerConfig, fd: RawFd) -> isize {
+fn spawn(config: ContainerConfig, fd: RawFd) -> isize {
+    match spawn_with_result(config, fd) {
+        Ok(_) => 0, // When Rust supports !, remove this branch
+        Err(err) => {
+            error!("{}", err);
+            1
+        }
+    }
+}
+
+fn spawn_with_result(
+    ContainerConfig {
+        path,
+        argv,
+        uid,
+        mount_dir,
+    }: ContainerConfig,
+    fd: RawFd,
+) -> eyre::Result<Infallible> {
     info!(
         "Running command {} with args {:?}",
-        config.path.to_str().expect("Command must be valid UTF-8"),
-        config.argv,
+        path.to_str().expect("Command must be valid UTF-8"),
+        argv,
     );
 
     // TODO: Possibly use OwnedFd
     let socket = unsafe { UnixDatagram::from_raw_fd(fd) };
 
-    // TODO: Pass error to socket?
-    if let Err(err) = switch_root(&config.mount_dir) {
-        return 1;
-    };
+    switch_root(&mount_dir)?;
 
-    0
+    Ok(execve::<_, CString>(&path, &argv, &[])?)
 }
 
 fn mount_dir(
