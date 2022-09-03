@@ -59,13 +59,15 @@ pub fn start(
     }: Args,
 ) -> eyre::Result<()> {
     let mut container = Container::new(&command, uid, mount_dir, hostname)?;
-    if let Err(err) = container.create() {
+
+    container.create().map_err(|err| {
         debug!("Error creating container: {err}");
 
-        // TODO: Combine the destroy error with the create error
-        container.destroy()?;
-        return Err(err);
-    }
+        match container.destroy() {
+            Ok(()) => err,
+            Err(destroy_err) => err.wrap_err(format!("Error destroying container: {destroy_err}")),
+        }
+    })?;
 
     container.wait_for_child()?;
 
