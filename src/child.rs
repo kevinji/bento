@@ -24,7 +24,6 @@ pub(super) fn clone_process(config: &ContainerConfig, fd: RawFd) -> eyre::Result
         CloneFlags::CLONE_NEWIPC,
         CloneFlags::CLONE_NEWNET,
         CloneFlags::CLONE_NEWNS,
-        CloneFlags::CLONE_NEWUSER,
         CloneFlags::CLONE_NEWPID,
         CloneFlags::CLONE_NEWUTS,
     ]);

@@ -1,6 +1,6 @@
-use crate::{child, cli::Args, container_config::ContainerConfig, ipc};
+use crate::{child, cli::Args, container_config::ContainerConfig, ipc, namespace};
 use cgroups_rs::{cgroup::Cgroup, cgroup_builder::CgroupBuilder};
-use nix::{sys::wait::waitpid, unistd::Pid};
+use nix::{libc::uid_t, sys::wait::waitpid, unistd::Pid};
 use std::{os::unix::io::RawFd, path::PathBuf};
 use tracing::debug;
 
@@ -15,13 +15,13 @@ pub(super) struct Container {
 impl Container {
     pub(super) fn new(
         command: &str,
-        uid: u32,
+        uid: uid_t,
         mount_dir: PathBuf,
         hostname: Option<String>,
     ) -> eyre::Result<Self> {
         let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
         let socketpair = ipc::create_socketpair()?;
-        let cgroup = build_cgroup("bento"); // TODO: Update cgroup name
+        let cgroup = build_cgroup("bento")?; // TODO: Update cgroup name
 
         Ok(Self {
             config,
@@ -32,6 +32,8 @@ impl Container {
     }
 
     pub(super) fn create(&mut self) -> eyre::Result<()> {
+        namespace::setup_user_namespace(self.config.uid)?;
+
         let child_pid = child::clone_process(&self.config, self.socketpair.1)?;
         self.child_pid = Some(child_pid);
 
@@ -62,9 +64,9 @@ const MAX_PROCESSES: i64 = 10;
 const CPU_SHARES: u64 = 250;
 
 // TODO: Verify that the Cgroup actually gets created
-fn build_cgroup(name: &str) -> Cgroup {
+fn build_cgroup(name: &str) -> eyre::Result<Cgroup> {
     use cgroups_rs::{hierarchies::V2, MaxValue};
-    CgroupBuilder::new(name)
+    Ok(CgroupBuilder::new(name)
         .memory()
         .kernel_memory_limit(KERNEL_MEMORY_LIMIT)
         .memory_hard_limit(MEMORY_HARD_LIMIT)
@@ -75,7 +77,7 @@ fn build_cgroup(name: &str) -> Cgroup {
         .cpu()
         .shares(CPU_SHARES)
         .done()
-        .build(Box::new(V2::new()))
+        .build(Box::new(V2::new()))?)
 }
 
 pub fn start(

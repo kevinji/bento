@@ -1,3 +1,4 @@
+use nix::libc::uid_t;
 use nix::unistd::Uid;
 use std::{ffi::CString, path::PathBuf};
 
@@ -13,7 +14,7 @@ pub(super) struct ContainerConfig {
 impl ContainerConfig {
     pub(super) fn new(
         command: &str,
-        uid: u32,
+        uid: uid_t,
         mount_dir: PathBuf,
         hostname: Option<String>,
     ) -> eyre::Result<ContainerConfig> {

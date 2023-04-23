@@ -1,5 +1,6 @@
 use clap::Parser;
 use eyre::ensure;
+use nix::libc::uid_t;
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Parser)]
@@ -10,7 +11,7 @@ pub struct Args {
 
     /// User ID to create inside the container
     #[clap(long)]
-    pub(super) uid: u32,
+    pub(super) uid: uid_t,
 
     /// Directory to mount as root of the container
     #[clap(long = "mount")]
@@ -31,7 +32,7 @@ impl Args {
             fs::metadata(&args.mount_dir)
                 .map(|m| m.is_dir())
                 .unwrap_or(false),
-            "Mount dir must exist"
+            "Mount dir must exist",
         );
 
         Ok(args)
