@@ -1,5 +1,4 @@
-use nix::libc::uid_t;
-use nix::unistd::Uid;
+use nix::{libc::uid_t, unistd::Uid};
 use std::{ffi::CString, path::PathBuf};
 
 #[derive(Debug, Clone)]

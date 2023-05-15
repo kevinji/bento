@@ -38,7 +38,9 @@ pub(super) fn clone_process(config: &ContainerConfig, fd: RawFd) -> eyre::Result
 
 fn spawn(config: ContainerConfig, fd: RawFd) -> isize {
     match spawn_with_result(config, fd) {
-        Ok(_) => 0, // When Rust supports !, remove this branch
+        Ok(never) => match never {
+           // When Rust supports !, remove this branch 
+        },
         Err(err) => {
             error!("{}", err);
             1
@@ -61,11 +63,8 @@ fn spawn_with_result(
         debug!("Hostname is now {hostname}");
     }
 
-    info!(
-        "Running command {} with args {:?}",
-        path.to_str().expect("Command must be valid UTF-8"),
-        argv,
-    );
+    let command = path.to_str().expect("Command must be valid UTF-8");
+    info!("Running command {command} with args {argv:?}");
 
     // TODO: Possibly use OwnedFd
     let socket = unsafe { UnixDatagram::from_raw_fd(fd) };
