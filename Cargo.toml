@@ -1,6 +1,8 @@
 [package]
 name = "bento"
 version = "0.1.0"
+repository = "https://github.com/kevinji/bento"
+authors = ["Kevin Ji"]
 edition = "2021"
 
 [dependencies]
