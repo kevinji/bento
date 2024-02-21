@@ -26,7 +26,6 @@ impl Container {
         let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
 
         let cgroup = build_cgroup("bento")?;
-        cgroup.add_task(u64::from(process::id()).into())?;
 
         namespace::setup_user_namespace(config.uid)?;
 
