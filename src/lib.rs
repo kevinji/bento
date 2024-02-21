@@ -5,7 +5,6 @@ mod child;
 mod cli;
 mod container;
 mod container_config;
-mod ipc;
 mod namespace;
 
 pub use cli::Args;

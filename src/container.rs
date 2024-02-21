@@ -1,56 +1,69 @@
-use crate::{child, cli::Args, container_config::ContainerConfig, ipc, namespace};
+use crate::{child, cli::Args, container_config::ContainerConfig, namespace};
 use cgroups_rs::{cgroup::Cgroup, cgroup_builder::CgroupBuilder};
-use nix::{libc::uid_t, sys::wait::waitpid, unistd::Pid};
-use std::{os::unix::io::RawFd, path::PathBuf};
-use tracing::debug;
+use eyre::{bail, WrapErr};
+use nix::{
+    libc::uid_t,
+    sys::wait::{waitpid, WaitStatus},
+    unistd::Pid,
+};
+use std::{os::unix::net::UnixDatagram, path::PathBuf, process};
+use tracing::{debug, error};
 
 #[derive(Debug)]
-pub(super) struct Container {
-    config: ContainerConfig,
-    child_pid: Option<Pid>,
-    socketpair: (RawFd, RawFd),
+pub struct Container {
+    child_pid: Pid,
+    socket: UnixDatagram,
     cgroup: Cgroup,
 }
 
 impl Container {
-    pub(super) fn new(
+    pub fn new(
         command: &str,
         uid: uid_t,
         mount_dir: PathBuf,
         hostname: Option<String>,
     ) -> eyre::Result<Self> {
         let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
-        let socketpair = ipc::create_socketpair()?;
-        let cgroup = build_cgroup("bento")?; // TODO: Update cgroup name
+
+        let cgroup = build_cgroup("bento")?;
+        cgroup.add_task(u64::from(process::id()).into())?;
+
+        namespace::setup_user_namespace(config.uid)?;
+
+        let (container_socket, child_socket) = UnixDatagram::pair()?;
+        container_socket.set_nonblocking(true)?;
+        child_socket.set_nonblocking(true)?;
+
+        let child_pid = child::clone_process(&config, child_socket)?;
+        debug!("Created container with child PID {child_pid}");
 
         Ok(Self {
-            config,
-            child_pid: None,
-            socketpair,
+            child_pid,
+            socket: container_socket,
             cgroup,
         })
     }
 
-    pub(super) fn create(&mut self) -> eyre::Result<()> {
-        namespace::setup_user_namespace(self.config.uid)?;
-
-        let child_pid = child::clone_process(&self.config, self.socketpair.1)?;
-        self.child_pid = Some(child_pid);
-
-        debug!("Created container with child PID {child_pid}");
-        Ok(())
-    }
-
-    pub(super) fn wait_for_child(&mut self) -> eyre::Result<()> {
-        if let Some(child_pid) = self.child_pid {
-            debug!("Waiting for child PID {child_pid} to finish");
-            let wait_status = waitpid(child_pid, None)?;
+    pub fn wait_for_child(&mut self) -> eyre::Result<()> {
+        debug!(
+            "Waiting for child PID {child_pid} to finish",
+            child_pid = self.child_pid
+        );
+        let wait_status = waitpid(self.child_pid, None)?;
+        match wait_status {
+            WaitStatus::Exited(_, exit_code) => {
+                if exit_code != 0 {
+                    error!("Child process exited with code {exit_code}");
+                }
+                Ok(())
+            }
+            _ => {
+                bail!("Unexpected wait status from child: {wait_status:?}");
+            }
         }
-
-        Ok(())
     }
 
-    pub(super) fn destroy(&mut self) -> eyre::Result<()> {
+    pub fn destroy(self) -> eyre::Result<()> {
         debug!("Destroyed container");
         self.cgroup.delete()?;
         Ok(())
@@ -88,17 +101,8 @@ pub fn start(
         hostname,
     }: Args,
 ) -> eyre::Result<()> {
-    let mut container = Container::new(&command, uid, mount_dir, hostname)?;
-
-    container.create().map_err(|err| {
-        debug!("Error creating container: {err}");
-
-        match container.destroy() {
-            Ok(()) => err,
-            Err(destroy_err) => err.wrap_err(format!("Error destroying container: {destroy_err}")),
-        }
-    })?;
-
+    let mut container =
+        Container::new(&command, uid, mount_dir, hostname).wrap_err("Error creating container")?;
     container.wait_for_child()?;
 
     debug!("Cleaning up container...");

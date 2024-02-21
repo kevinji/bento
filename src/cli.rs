@@ -1,5 +1,4 @@
 use clap::Parser;
-use eyre::ensure;
 use nix::libc::uid_t;
 use std::{fs, path::PathBuf};
 
@@ -7,33 +6,29 @@ use std::{fs, path::PathBuf};
 pub struct Args {
     /// Command to execute inside the container
     #[clap(long)]
-    pub(super) command: String,
+    pub command: String,
 
     /// User ID to create inside the container
     #[clap(long)]
-    pub(super) uid: uid_t,
+    pub uid: uid_t,
 
+    // TODO: Consider creating a tempdir as default
     /// Directory to mount as root of the container
     #[clap(long = "mount")]
-    pub(super) mount_dir: PathBuf,
+    pub mount_dir: PathBuf,
 
     /// Hostname of the container
     #[clap(long)]
-    pub(super) hostname: Option<String>,
+    pub hostname: Option<String>,
 }
 
 impl Args {
     /// # Errors
     ///
-    /// Returns an error if parsing `Args` fails, or if `mount_dir` is not a directory.
+    /// Returns an error if parsing `Args` fails, or creating `mount_dir` fails.
     pub fn try_parse_and_validate() -> eyre::Result<Self> {
         let args = Args::try_parse()?;
-        ensure!(
-            fs::metadata(&args.mount_dir)
-                .map(|m| m.is_dir())
-                .unwrap_or(false),
-            "Mount dir must exist",
-        );
+        fs::create_dir_all(&args.mount_dir)?;
 
         Ok(args)
     }

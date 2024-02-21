@@ -5,21 +5,17 @@ use nix::{
     sys::signal::Signal,
     unistd::{chdir, execve, pivot_root, sethostname, Pid},
 };
-use std::{
-    convert::Infallible,
-    ffi::CString,
-    os::unix::{io::RawFd, net::UnixDatagram, prelude::FromRawFd},
-    path::PathBuf,
-};
+use std::{convert::Infallible, ffi::CString, os::unix::net::UnixDatagram, path::PathBuf};
 use tracing::{debug, error, info};
 
 const STACK_SIZE: usize = 1024 * 1024;
 
-pub(super) fn clone_process(config: &ContainerConfig, fd: RawFd) -> eyre::Result<Pid> {
+pub fn clone_process(config: &ContainerConfig, socket: UnixDatagram) -> eyre::Result<Pid> {
+    let cb = Box::new(|| spawn(config.clone(), &socket));
     let mut stack = [0; STACK_SIZE];
 
     let flags = CloneFlags::from_iter([
-        CloneFlags::CLONE_FILES, // TODO: Is this needed?
+        CloneFlags::CLONE_FILES, // fd of socket must be shared to child
         CloneFlags::CLONE_NEWCGROUP,
         CloneFlags::CLONE_NEWIPC,
         CloneFlags::CLONE_NEWNET,
@@ -28,21 +24,18 @@ pub(super) fn clone_process(config: &ContainerConfig, fd: RawFd) -> eyre::Result
         CloneFlags::CLONE_NEWUTS,
     ]);
 
-    Ok(clone(
-        Box::new(|| spawn(config.clone(), fd)),
-        &mut stack,
-        flags,
-        Some(Signal::SIGCHLD as i32),
-    )?)
+    let signal = Signal::SIGCHLD as i32;
+
+    Ok(unsafe { clone(cb, &mut stack, flags, Some(signal)) }?)
 }
 
-fn spawn(config: ContainerConfig, fd: RawFd) -> isize {
-    match spawn_with_result(config, fd) {
-        Ok(never) => match never {
+fn spawn(config: ContainerConfig, socket: &UnixDatagram) -> isize {
+    match spawn_with_result(config, socket) {
+        Ok(infallible) => match infallible {
            // When Rust supports !, remove this branch 
         },
         Err(err) => {
-            error!("{}", err);
+            error!("{err}");
             1
         }
     }
@@ -52,11 +45,11 @@ fn spawn_with_result(
     ContainerConfig {
         path,
         argv,
-        uid,
+        uid: _,
         mount_dir,
         hostname,
     }: ContainerConfig,
-    fd: RawFd,
+    socket: &UnixDatagram,
 ) -> eyre::Result<Infallible> {
     if let Some(hostname) = hostname {
         sethostname(&hostname)?;
@@ -65,9 +58,6 @@ fn spawn_with_result(
 
     let command = path.to_str().expect("Command must be valid UTF-8");
     info!("Running command {command} with args {argv:?}");
-
-    // TODO: Possibly use OwnedFd
-    let socket = unsafe { UnixDatagram::from_raw_fd(fd) };
 
     switch_root(&mount_dir)?;
 

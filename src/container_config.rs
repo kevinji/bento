@@ -2,7 +2,7 @@ use nix::{libc::uid_t, unistd::Uid};
 use std::{ffi::CString, path::PathBuf};
 
 #[derive(Debug, Clone)]
-pub(super) struct ContainerConfig {
+pub struct ContainerConfig {
     pub path: CString,
     pub argv: Vec<CString>,
     pub uid: Uid,
@@ -11,7 +11,7 @@ pub(super) struct ContainerConfig {
 }
 
 impl ContainerConfig {
-    pub(super) fn new(
+    pub fn new(
         command: &str,
         uid: uid_t,
         mount_dir: PathBuf,

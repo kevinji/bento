@@ -4,7 +4,7 @@ use nix::{
 };
 use tracing::{debug, warn};
 
-pub(crate) fn setup_user_namespace(uid: Uid) -> eyre::Result<()> {
+pub fn setup_user_namespace(uid: Uid) -> eyre::Result<()> {
     debug!("Setting up user namespace with uid {uid}");
     match unshare(CloneFlags::CLONE_NEWUSER) {
         Ok(()) => (),

@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 cgroups-rs = "0.3"
-clap = { version = "4.2", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
-nix = "0.26"
+nix = { version = "0.27", features = ["fs", "hostname", "mount", "sched", "socket", "user"] }
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
