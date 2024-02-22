@@ -60,6 +60,7 @@ fn spawn_with_result(
     }
 
     let user_namespace_created = create_user_namespace();
+    debug!("User namespace created {user_namespace_created}, sending to container");
     sockets::send_bool(socket, user_namespace_created)?;
 
     let uid_and_gid_created = sockets::recv_bool(socket)?;

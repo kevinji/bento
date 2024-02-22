@@ -9,12 +9,13 @@ use nix::{
     sys::wait::{waitpid, WaitStatus},
     unistd::Pid,
 };
-use std::{os::unix::net::UnixDatagram, path::PathBuf};
+use std::{net::Shutdown, os::unix::net::UnixDatagram, path::PathBuf};
 use tracing::{debug, error};
 
 #[derive(Debug)]
 pub struct Container {
     child_pid: Pid,
+    socket: UnixDatagram,
     cgroup: Cgroup,
 }
 
@@ -36,12 +37,19 @@ impl Container {
         debug!("Created container with child PID {child_pid}");
 
         let user_namespace_created = sockets::recv_bool(&container_socket)?;
+        debug!("User namespace created {user_namespace_created}, received");
         if user_namespace_created {
             read_and_write_uid_and_gid_mappings(child_pid)?;
         }
+
+        debug!("Notifying child that UID and GID mappings are ready");
         sockets::send_bool(&container_socket, true)?;
 
-        Ok(Self { child_pid, cgroup })
+        Ok(Self {
+            child_pid,
+            socket: container_socket,
+            cgroup,
+        })
     }
 
     pub fn wait_for_child(&mut self) -> eyre::Result<()> {
@@ -65,6 +73,7 @@ impl Container {
 
     pub fn destroy(self) -> eyre::Result<()> {
         debug!("Destroyed container");
+        self.socket.shutdown(Shutdown::Both)?;
         self.cgroup.delete()?;
         Ok(())
     }
