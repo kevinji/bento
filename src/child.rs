@@ -1,12 +1,15 @@
-use crate::container_config::ContainerConfig;
+use crate::{container_config::ContainerConfig, sockets};
+use eyre::bail;
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
-    sched::{clone, CloneFlags},
+    sched::{clone, unshare, CloneFlags},
     sys::signal::Signal,
-    unistd::{chdir, execve, pivot_root, sethostname, Pid},
+    unistd::{
+        chdir, execve, pivot_root, setgroups, sethostname, setresgid, setresuid, Gid, Pid, Uid,
+    },
 };
 use std::{convert::Infallible, ffi::CString, os::unix::net::UnixDatagram, path::PathBuf};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 const STACK_SIZE: usize = 1024 * 1024;
 
@@ -45,7 +48,7 @@ fn spawn_with_result(
     ContainerConfig {
         path,
         argv,
-        uid: _,
+        uid,
         mount_dir,
         hostname,
     }: ContainerConfig,
@@ -56,12 +59,45 @@ fn spawn_with_result(
         debug!("Hostname is now {hostname}");
     }
 
+    let user_namespace_created = create_user_namespace();
+    sockets::send_bool(socket, user_namespace_created)?;
+
+    let uid_and_gid_created = sockets::recv_bool(socket)?;
+    if !uid_and_gid_created {
+        bail!("BUG: uid_and_gid_created should never be false");
+    }
+    set_uid(uid)?;
+
     let command = path.to_str().expect("Command must be valid UTF-8");
     info!("Running command {command} with args {argv:?}");
 
     switch_root(&mount_dir)?;
 
     Ok(execve::<_, CString>(&path, &argv, &[])?)
+}
+
+fn create_user_namespace() -> bool {
+    match unshare(CloneFlags::CLONE_NEWUSER) {
+        Ok(()) => {
+            debug!("User namespace created");
+            true
+        }
+        Err(err) => {
+            warn!("User namespaces not supported: {err}");
+            false
+        }
+    }
+}
+
+fn set_uid(uid: Uid) -> eyre::Result<()> {
+    debug!("Setting uid as {uid}");
+
+    let gid = Gid::from_raw(uid.as_raw());
+    setgroups(&[gid])?;
+    setresgid(gid, gid, gid)?;
+    setresuid(uid, uid, uid)?;
+
+    Ok(())
 }
 
 fn mount_dir(

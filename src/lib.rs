@@ -5,7 +5,8 @@ mod child;
 mod cli;
 mod container;
 mod container_config;
-mod namespace;
+mod sockets;
+mod uid_gid_mapping;
 
 pub use cli::Args;
 pub use container::start;

@@ -1,4 +1,7 @@
-use crate::{child, cli::Args, container_config::ContainerConfig, namespace};
+use crate::{
+    child, cli::Args, container_config::ContainerConfig, sockets,
+    uid_gid_mapping::read_and_write_uid_and_gid_mappings,
+};
 use cgroups_rs::{cgroup::Cgroup, cgroup_builder::CgroupBuilder};
 use eyre::{bail, WrapErr};
 use nix::{
@@ -6,15 +9,16 @@ use nix::{
     sys::wait::{waitpid, WaitStatus},
     unistd::Pid,
 };
-use std::{os::unix::net::UnixDatagram, path::PathBuf, process};
+use std::{os::unix::net::UnixDatagram, path::PathBuf};
 use tracing::{debug, error};
 
 #[derive(Debug)]
 pub struct Container {
     child_pid: Pid,
-    socket: UnixDatagram,
     cgroup: Cgroup,
 }
+
+const CGROUP_NAME: &str = "bento";
 
 impl Container {
     pub fn new(
@@ -25,22 +29,19 @@ impl Container {
     ) -> eyre::Result<Self> {
         let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
 
-        let cgroup = build_cgroup("bento")?;
-
-        namespace::setup_user_namespace(config.uid)?;
-
+        let cgroup = build_cgroup(CGROUP_NAME)?;
         let (container_socket, child_socket) = UnixDatagram::pair()?;
-        container_socket.set_nonblocking(true)?;
-        child_socket.set_nonblocking(true)?;
 
         let child_pid = child::clone_process(&config, child_socket)?;
         debug!("Created container with child PID {child_pid}");
 
-        Ok(Self {
-            child_pid,
-            socket: container_socket,
-            cgroup,
-        })
+        let user_namespace_created = sockets::recv_bool(&container_socket)?;
+        if user_namespace_created {
+            read_and_write_uid_and_gid_mappings(child_pid)?;
+        }
+        sockets::send_bool(&container_socket, true)?;
+
+        Ok(Self { child_pid, cgroup })
     }
 
     pub fn wait_for_child(&mut self) -> eyre::Result<()> {
