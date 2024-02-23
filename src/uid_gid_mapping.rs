@@ -5,6 +5,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     str::FromStr,
 };
+use tracing::debug;
 
 #[derive(Debug, Eq, PartialEq)]
 enum UidOrUser {
@@ -55,6 +56,7 @@ fn read_subuid() -> eyre::Result<Option<UidMapping>> {
     let current_user = User::from_uid(current_uid)?
         .ok_or_else(|| eyre!("User must exist for current UID {current_uid}"))?
         .name;
+    debug!("Current UID {current_uid} has name {current_user}");
 
     let file = File::open(SUBUID_PATH)?;
     let reader = BufReader::new(file);
@@ -67,6 +69,7 @@ fn read_subuid() -> eyre::Result<Option<UidMapping>> {
         };
 
         if is_current_user {
+            debug!("Found UID mapping: {uid_mapping:?}");
             return Ok(Some(uid_mapping));
         }
     }
@@ -87,6 +90,7 @@ fn write_to_uid_map(
     }: &UidMapping,
 ) -> eyre::Result<()> {
     let path = uid_map_path(pid);
+    debug!("Writing to UID map: {path}");
     let mut file = File::options().write(true).create_new(true).open(path)?;
     file.write_all(format!("0 {sub_uid} {sub_count}\n").as_bytes())?;
     Ok(())
@@ -141,6 +145,7 @@ fn read_subgid() -> eyre::Result<Option<GidMapping>> {
     let current_group = Group::from_gid(current_gid)?
         .ok_or_else(|| eyre!("Group must exist for current GID {current_gid}"))?
         .name;
+    debug!("Current GID {current_gid} has name {current_group}");
 
     let file = File::open(SUBGID_PATH)?;
     let reader = BufReader::new(file);
@@ -153,6 +158,7 @@ fn read_subgid() -> eyre::Result<Option<GidMapping>> {
         };
 
         if is_current_group {
+            debug!("Found GID mapping: {gid_mapping:?}");
             return Ok(Some(gid_mapping));
         }
     }
@@ -173,6 +179,7 @@ fn write_to_gid_map(
     }: &GidMapping,
 ) -> eyre::Result<()> {
     let path = gid_map_path(pid);
+    debug!("Writing to GID map: {path}");
     let mut file = File::options().write(true).create_new(true).open(path)?;
     file.write_all(format!("0 {sub_gid} {sub_count}\n").as_bytes())?;
     Ok(())
