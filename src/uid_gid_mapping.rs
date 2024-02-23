@@ -91,7 +91,7 @@ fn write_to_uid_map(
 ) -> eyre::Result<()> {
     let path = uid_map_path(pid);
     debug!("Writing to UID map: {path}");
-    let mut file = File::options().write(true).create_new(true).open(path)?;
+    let mut file = File::create(path)?;
     file.write_all(format!("0 {sub_uid} {sub_count}\n").as_bytes())?;
     Ok(())
 }
@@ -180,7 +180,7 @@ fn write_to_gid_map(
 ) -> eyre::Result<()> {
     let path = gid_map_path(pid);
     debug!("Writing to GID map: {path}");
-    let mut file = File::options().write(true).create_new(true).open(path)?;
+    let mut file = File::create(path)?;
     file.write_all(format!("0 {sub_gid} {sub_count}\n").as_bytes())?;
     Ok(())
 }
