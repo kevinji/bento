@@ -6,6 +6,7 @@ authors = ["Kevin Ji"]
 edition = "2021"
 
 [dependencies]
+capctl = "0.2"
 cgroups-rs = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"

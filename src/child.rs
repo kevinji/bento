@@ -1,4 +1,5 @@
 use crate::{container_config::ContainerConfig, sockets};
+use capctl::{bounding, Cap, CapState};
 use eyre::bail;
 use lddtree::DependencyAnalyzer;
 use nix::{
@@ -86,6 +87,8 @@ fn spawn_with_result(
         bail!("BUG: uid_and_gid_created should never be false");
     }
     set_uid(uid)?;
+
+    restrict_caps()?;
 
     info!("Running command {command} with args {argv:?}");
     Ok(execve::<_, CString>(&CString::new(command)?, &argv, &[])?)
@@ -193,5 +196,53 @@ fn switch_root(new_root: &Path) -> eyre::Result<()> {
 
     debug!("Unmounting old root");
     umount2(".", MntFlags::MNT_DETACH)?;
+    Ok(())
+}
+
+// Reference: https://blog.lizzie.io/linux-containers-in-500-loc.html#org07e738c
+const CAPS_TO_DROP: [Cap; 21] = [
+    Cap::AUDIT_CONTROL,
+    Cap::AUDIT_READ,
+    Cap::AUDIT_WRITE,
+    Cap::BLOCK_SUSPEND,
+    Cap::DAC_OVERRIDE, // Added to be safe
+    Cap::DAC_READ_SEARCH,
+    Cap::FSETID,
+    Cap::IPC_LOCK,
+    Cap::MAC_ADMIN,
+    Cap::MAC_OVERRIDE,
+    Cap::MKNOD,
+    Cap::SETFCAP,
+    Cap::SYSLOG,
+    Cap::SYS_ADMIN,
+    Cap::SYS_BOOT,
+    Cap::SYS_MODULE,
+    Cap::SYS_NICE,
+    Cap::SYS_RAWIO,
+    Cap::SYS_RESOURCE,
+    Cap::SYS_TIME,
+    Cap::WAKE_ALARM,
+];
+
+fn restrict_caps() -> eyre::Result<()> {
+    debug!("Dropping bounding capabilities");
+    let bounding_caps = bounding::probe();
+    for cap in CAPS_TO_DROP {
+        if bounding_caps.has(cap) {
+            debug!("Dropping bounding cap {cap:?}");
+            bounding::ensure_dropped(cap)?;
+        }
+    }
+
+    debug!("Dropping inheritable capabilities");
+    let mut cap_state = CapState::get_current()?;
+    for cap in CAPS_TO_DROP {
+        if cap_state.inheritable.has(cap) {
+            debug!("Dropping inheritable cap {cap:?}");
+            cap_state.inheritable.drop(cap);
+        }
+    }
+    cap_state.set_current()?;
+
     Ok(())
 }
