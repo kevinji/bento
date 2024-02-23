@@ -10,9 +10,14 @@ use nix::{
         chdir, execve, pivot_root, setgroups, sethostname, setresgid, setresuid, Gid, Pid, Uid,
     },
 };
+use seccompiler::{
+    BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+    SeccompRule,
+};
 use std::{
     collections::HashSet,
     convert::Infallible,
+    env,
     ffi::CString,
     fs,
     os::{
@@ -89,6 +94,7 @@ fn spawn_with_result(
     set_uid(uid)?;
 
     restrict_caps()?;
+    apply_seccomp_filter()?;
 
     info!("Running command {command} with args {argv:?}");
     Ok(execve::<_, CString>(&CString::new(command)?, &argv, &[])?)
@@ -244,5 +250,134 @@ fn restrict_caps() -> eyre::Result<()> {
     }
     cap_state.set_current()?;
 
+    Ok(())
+}
+
+fn apply_seccomp_filter() -> eyre::Result<()> {
+    use nix::libc;
+
+    // Reference: https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16
+    let filter: BpfProgram = SeccompFilter::new(
+        [
+            #[cfg(target_arch = "x86_64")]
+            (
+                libc::SYS_chmod,
+                vec![SeccompRule::new(vec![
+                    SeccompCondition::new(
+                        1,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISUID.into()),
+                        libc::S_ISUID.into(),
+                    )
+                    .unwrap(),
+                    SeccompCondition::new(
+                        1,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISGID.into()),
+                        libc::S_ISGID.into(),
+                    )
+                    .unwrap(),
+                ])
+                .unwrap()],
+            ),
+            (
+                libc::SYS_fchmod,
+                vec![SeccompRule::new(vec![
+                    SeccompCondition::new(
+                        1,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISUID.into()),
+                        libc::S_ISUID.into(),
+                    )
+                    .unwrap(),
+                    SeccompCondition::new(
+                        1,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISGID.into()),
+                        libc::S_ISGID.into(),
+                    )
+                    .unwrap(),
+                ])
+                .unwrap()],
+            ),
+            (
+                libc::SYS_fchmodat,
+                vec![SeccompRule::new(vec![
+                    SeccompCondition::new(
+                        2,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISUID.into()),
+                        libc::S_ISUID.into(),
+                    )
+                    .unwrap(),
+                    SeccompCondition::new(
+                        2,
+                        SeccompCmpArgLen::Qword,
+                        SeccompCmpOp::MaskedEq(libc::S_ISGID.into()),
+                        libc::S_ISGID.into(),
+                    )
+                    .unwrap(),
+                ])
+                .unwrap()],
+            ),
+            (
+                libc::SYS_unshare,
+                vec![SeccompRule::new(vec![SeccompCondition::new(
+                    0,
+                    SeccompCmpArgLen::Qword,
+                    SeccompCmpOp::MaskedEq(libc::CLONE_NEWUSER.try_into().unwrap()),
+                    libc::CLONE_NEWUSER.try_into().unwrap(),
+                )
+                .unwrap()])
+                .unwrap()],
+            ),
+            (
+                libc::SYS_clone,
+                vec![SeccompRule::new(vec![SeccompCondition::new(
+                    0,
+                    SeccompCmpArgLen::Qword,
+                    SeccompCmpOp::MaskedEq(libc::CLONE_NEWUSER.try_into().unwrap()),
+                    libc::CLONE_NEWUSER.try_into().unwrap(),
+                )
+                .unwrap()])
+                .unwrap()],
+            ),
+            // Allow writing to the controlling terminal for /bin/bash
+            /*
+            (
+                libc::SYS_ioctl,
+                vec![SeccompRule::new(vec![SeccompCondition::new(
+                    1,
+                    SeccompCmpArgLen::Qword,
+                    SeccompCmpOp::MaskedEq(libc::TIOCSTI),
+                    libc::TIOCSTI,
+                )
+                .unwrap()])
+                .unwrap()],
+            ),
+            */
+            (libc::SYS_keyctl, vec![]),
+            (libc::SYS_add_key, vec![]),
+            (libc::SYS_request_key, vec![]),
+            (libc::SYS_ptrace, vec![]),
+            (libc::SYS_mbind, vec![]),
+            (libc::SYS_migrate_pages, vec![]),
+            (libc::SYS_move_pages, vec![]),
+            (libc::SYS_set_mempolicy, vec![]),
+            (libc::SYS_userfaultfd, vec![]),
+            (libc::SYS_perf_event_open, vec![]),
+        ]
+        .into_iter()
+        .collect(),
+        SeccompAction::Allow,
+        SeccompAction::Trap,
+        env::consts::ARCH.try_into().unwrap(),
+    )
+    .unwrap()
+    .try_into()
+    .unwrap();
+
+    debug!("Applying seccomp filter");
+    seccompiler::apply_filter(&filter)?;
     Ok(())
 }
