@@ -50,7 +50,7 @@ impl FromStr for UidMapping {
 
 const SUBUID_PATH: &str = "/etc/subuid";
 
-fn read_subuid() -> eyre::Result<Option<(Uid, UidMapping)>> {
+fn read_subuid() -> eyre::Result<Option<UidMapping>> {
     let current_uid = getuid();
     let current_user = User::from_uid(current_uid)?
         .ok_or_else(|| eyre!("User must exist for current UID {current_uid}"))?
@@ -67,7 +67,7 @@ fn read_subuid() -> eyre::Result<Option<(Uid, UidMapping)>> {
         };
 
         if is_current_user {
-            return Ok(Some((current_uid, uid_mapping)));
+            return Ok(Some(uid_mapping));
         }
     }
 
@@ -80,7 +80,6 @@ fn uid_map_path(pid: Pid) -> String {
 
 fn write_to_uid_map(
     pid: Pid,
-    uid: Uid,
     UidMapping {
         uid_or_user: _,
         sub_uid,
@@ -89,7 +88,7 @@ fn write_to_uid_map(
 ) -> eyre::Result<()> {
     let path = uid_map_path(pid);
     let mut file = File::options().write(true).create_new(true).open(path)?;
-    file.write_all(format!("{uid} {sub_uid} {sub_count}\n").as_bytes())?;
+    file.write_all(format!("0 {sub_uid} {sub_count}\n").as_bytes())?;
     Ok(())
 }
 
@@ -137,7 +136,7 @@ impl FromStr for GidMapping {
 
 const SUBGID_PATH: &str = "/etc/subgid";
 
-fn read_subgid() -> eyre::Result<Option<(Gid, GidMapping)>> {
+fn read_subgid() -> eyre::Result<Option<GidMapping>> {
     let current_gid = getgid();
     let current_group = Group::from_gid(current_gid)?
         .ok_or_else(|| eyre!("Group must exist for current GID {current_gid}"))?
@@ -154,7 +153,7 @@ fn read_subgid() -> eyre::Result<Option<(Gid, GidMapping)>> {
         };
 
         if is_current_group {
-            return Ok(Some((current_gid, gid_mapping)));
+            return Ok(Some(gid_mapping));
         }
     }
 
@@ -167,7 +166,6 @@ fn gid_map_path(pid: Pid) -> String {
 
 fn write_to_gid_map(
     pid: Pid,
-    gid: Gid,
     GidMapping {
         gid_or_group: _,
         sub_gid,
@@ -176,7 +174,7 @@ fn write_to_gid_map(
 ) -> eyre::Result<()> {
     let path = gid_map_path(pid);
     let mut file = File::options().write(true).create_new(true).open(path)?;
-    file.write_all(format!("{gid} {sub_gid} {sub_count}\n").as_bytes())?;
+    file.write_all(format!("0 {sub_gid} {sub_count}\n").as_bytes())?;
     Ok(())
 }
 
@@ -184,11 +182,11 @@ pub fn read_and_write_uid_and_gid_mappings(pid: Pid) -> eyre::Result<()> {
     let subuid = read_subuid()?;
     let subgid = read_subgid()?;
 
-    if let Some((uid, uid_mapping)) = subuid {
-        write_to_uid_map(pid, uid, &uid_mapping)?;
+    if let Some(uid_mapping) = subuid {
+        write_to_uid_map(pid, &uid_mapping)?;
     }
-    if let Some((gid, gid_mapping)) = subgid {
-        write_to_gid_map(pid, gid, &gid_mapping)?;
+    if let Some(gid_mapping) = subgid {
+        write_to_gid_map(pid, &gid_mapping)?;
     }
 
     Ok(())
