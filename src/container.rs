@@ -32,6 +32,12 @@ impl Container {
         let config = ContainerConfig::new(command, uid, mount_dir, hostname, commands_to_copy)?;
 
         let cgroup = build_cgroup(CGROUP_NAME)?;
+        debug!("Created cgroup {CGROUP_NAME}");
+
+        let cgroup_pid = u64::try_from(Pid::this().as_raw()).unwrap().into();
+        cgroup.add_task_by_tgid(cgroup_pid)?;
+        debug!("Added PID to cgroup");
+
         let (container_socket, child_socket) = UnixDatagram::pair()?;
 
         let child_pid = child::clone_process(&config, child_socket)?;
@@ -73,9 +79,18 @@ impl Container {
     }
 
     pub fn destroy(self) -> eyre::Result<()> {
-        debug!("Destroyed container");
+        debug!("Destroying container");
+
         self.socket.shutdown(Shutdown::Both)?;
+        debug!("Socket shut down");
+
+        let cgroup_pid = u64::try_from(Pid::this().as_raw()).unwrap().into();
+        self.cgroup.remove_task_by_tgid(cgroup_pid)?;
+        debug!("Removed PID from cgroup");
+
         self.cgroup.delete()?;
+        debug!("Cgroup deleted");
+
         Ok(())
     }
 }
@@ -86,7 +101,6 @@ const MEMORY_HARD_LIMIT: i64 = GIB;
 const MAX_PROCESSES: i64 = 10;
 const CPU_SHARES: u64 = 250;
 
-// TODO: Verify that the Cgroup actually gets created
 fn build_cgroup(name: &str) -> eyre::Result<Cgroup> {
     use cgroups_rs::{hierarchies::V2, MaxValue};
     Ok(CgroupBuilder::new(name)
@@ -112,6 +126,8 @@ pub fn start(
         commands_to_copy,
     }: Args,
 ) -> eyre::Result<()> {
+    debug!("Container PID: {}", Pid::this());
+
     let mut container = Container::new(command, uid, mount_dir, hostname, commands_to_copy)
         .wrap_err("Error creating container")?;
     container.wait_for_child()?;
