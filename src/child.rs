@@ -1,5 +1,6 @@
 use crate::{container_config::ContainerConfig, sockets};
 use eyre::{bail, WrapErr};
+use lddtree::DependencyAnalyzer;
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::{clone, unshare, CloneFlags},
@@ -16,7 +17,7 @@ use std::{
         fd::{FromRawFd, IntoRawFd, RawFd},
         unix::net::UnixDatagram,
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use tracing::{debug, error, info, warn};
 
@@ -113,17 +114,43 @@ fn set_uid(uid: Uid) -> eyre::Result<()> {
     Ok(())
 }
 
-fn mount_at_path(
-    path: Option<&PathBuf>,
-    mount_point: &PathBuf,
-    flags: Vec<MsFlags>,
-) -> eyre::Result<()> {
+fn mount_at_path(path: Option<&Path>, mount_point: &Path, flags: Vec<MsFlags>) -> eyre::Result<()> {
     debug!("Mounting {path:?} at {mount_point:?} with flags {flags:?}");
-    mount::<_, _, PathBuf, PathBuf>(path, mount_point, None, MsFlags::from_iter(flags), None)?;
+    mount::<_, _, Path, Path>(path, mount_point, None, MsFlags::from_iter(flags), None)?;
     Ok(())
 }
 
-fn mount_roots_and_paths(new_root: &PathBuf, command: &str) -> eyre::Result<()> {
+fn get_library_paths(command: &str) -> eyre::Result<Vec<PathBuf>> {
+    let dependency_analyzer = DependencyAnalyzer::new("/".into());
+    let dependency_tree = dependency_analyzer.analyze(command)?;
+    Ok(dependency_tree
+        .libraries
+        .into_values()
+        .map(|library| (library.path))
+        .collect())
+}
+
+fn mkdir_and_copy(new_root: &Path, paths: &[PathBuf]) -> eyre::Result<()> {
+    for path in paths {
+        let stripped_path = path.strip_prefix("/").unwrap_or(path);
+        if let Some(new_parent_path) = new_root.join(stripped_path).parent() {
+            debug!("Creating dir {}", new_parent_path.display());
+            fs::create_dir_all(new_parent_path)?;
+        }
+
+        let new_path = new_root.join(stripped_path);
+        debug!("Copying file {} to {}", path.display(), new_path.display());
+        fs::copy(path, &new_path)?;
+
+        debug!("Setting {} as readonly", new_path.display());
+        let mut perms = fs::metadata(&new_path)?.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&new_path, perms)?;
+    }
+    Ok(())
+}
+
+fn mount_roots_and_paths(new_root: &Path, command: &str) -> eyre::Result<()> {
     mount_at_path(
         None,
         &PathBuf::from("/"),
@@ -135,26 +162,16 @@ fn mount_roots_and_paths(new_root: &PathBuf, command: &str) -> eyre::Result<()> 
         vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
     )?;
 
-    // TODO: Remove hardcoded paths
-    let stripped_command = command.strip_prefix("/").unwrap_or(command);
-    if let Some(command_dir) = new_root.join(stripped_command).parent() {
-        debug!("Creating dir {}", command_dir.display());
-        fs::create_dir_all(command_dir)?;
-    }
-    fs::copy(command, new_root.join(stripped_command))?;
+    let mut command_and_lib_paths = get_library_paths(command)?;
+    debug!("Libraries of command: {command_and_lib_paths:?}");
+    command_and_lib_paths.push(command.into());
 
-    debug!("Creating dir {}", new_root.join("lib").display());
-    fs::create_dir_all(&new_root.join("lib"))?;
-    mount_at_path(
-        Some(&PathBuf::from("/lib")),
-        &new_root.join("lib"),
-        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE, MsFlags::MS_RDONLY],
-    )?;
+    mkdir_and_copy(new_root, &command_and_lib_paths)?;
 
     Ok(())
 }
 
-fn switch_root(new_root: &PathBuf) -> eyre::Result<()> {
+fn switch_root(new_root: &Path) -> eyre::Result<()> {
     // Avoid creating a temporary dir for the old root:
     // https://man7.org/linux/man-pages/man2/pivot_root.2.html
     debug!("Running chdir({new_root})", new_root = new_root.display());

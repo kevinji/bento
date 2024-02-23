@@ -10,10 +10,14 @@ cgroups-rs = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
-nix = { version = "0.27", features = ["fs", "hostname", "mount", "sched", "socket", "user"] }
+lddtree = "0.3"
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
+
+[dependencies.nix]
+version = "0.27"
+features = ["fs", "hostname", "mount", "sched", "socket", "user"]
 
 [package.metadata.cross.build]
 default-target = "aarch64-unknown-linux-gnu"
