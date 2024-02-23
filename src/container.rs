@@ -38,6 +38,9 @@ impl Container {
         cgroup.add_task_by_tgid(cgroup_pid)?;
         debug!("Added PID to cgroup");
 
+        set_fd_limit()?;
+        debug!("Set file descriptor limit");
+
         let (container_socket, child_socket) = UnixDatagram::pair()?;
 
         let child_pid = child::clone_process(&config, child_socket)?;
@@ -98,8 +101,8 @@ impl Container {
 const GIB: i64 = 1024 * 1024 * 1024;
 const KERNEL_MEMORY_LIMIT: i64 = GIB;
 const MEMORY_HARD_LIMIT: i64 = GIB;
-const MAX_PROCESSES: i64 = 10;
-const CPU_SHARES: u64 = 250;
+const MAX_PROCESSES: i64 = 64;
+const CPU_SHARES: u64 = 256;
 
 fn build_cgroup(name: &str) -> eyre::Result<Cgroup> {
     use cgroups_rs::{hierarchies::V2, MaxValue};
@@ -115,6 +118,14 @@ fn build_cgroup(name: &str) -> eyre::Result<Cgroup> {
         .shares(CPU_SHARES)
         .done()
         .build(Box::new(V2::new()))?)
+}
+
+const FD_LIMIT: u64 = 64;
+
+fn set_fd_limit() -> eyre::Result<()> {
+    use rlimit::{setrlimit, Resource};
+    setrlimit(Resource::NOFILE, FD_LIMIT, FD_LIMIT)?;
+    Ok(())
 }
 
 pub fn start(
