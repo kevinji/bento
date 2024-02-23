@@ -8,13 +8,22 @@ use nix::{
         chdir, execve, pivot_root, setgroups, sethostname, setresgid, setresuid, Gid, Pid, Uid,
     },
 };
-use std::{convert::Infallible, ffi::CString, os::unix::net::UnixDatagram, path::PathBuf};
+use std::{
+    convert::Infallible,
+    ffi::CString,
+    os::{
+        fd::{FromRawFd, IntoRawFd, RawFd},
+        unix::net::UnixDatagram,
+    },
+    path::PathBuf,
+};
 use tracing::{debug, error, info, warn};
 
 const STACK_SIZE: usize = 1024 * 1024;
 
 pub fn clone_process(config: &ContainerConfig, socket: UnixDatagram) -> eyre::Result<Pid> {
-    let cb = Box::new(|| spawn(config.clone(), &socket));
+    let socket_fd = socket.into_raw_fd();
+    let cb = Box::new(|| spawn(config.clone(), socket_fd));
     let mut stack = [0; STACK_SIZE];
 
     let flags = CloneFlags::from_iter([
@@ -32,8 +41,8 @@ pub fn clone_process(config: &ContainerConfig, socket: UnixDatagram) -> eyre::Re
     Ok(unsafe { clone(cb, &mut stack, flags, Some(signal)) }?)
 }
 
-fn spawn(config: ContainerConfig, socket: &UnixDatagram) -> isize {
-    match spawn_with_result(config, socket) {
+fn spawn(config: ContainerConfig, socket_fd: RawFd) -> isize {
+    match spawn_with_result(config, socket_fd) {
         Ok(infallible) => match infallible {
            // When Rust supports !, remove this branch 
         },
@@ -52,8 +61,10 @@ fn spawn_with_result(
         mount_dir,
         hostname,
     }: ContainerConfig,
-    socket: &UnixDatagram,
+    socket_fd: RawFd,
 ) -> eyre::Result<Infallible> {
+    let socket = unsafe { UnixDatagram::from_raw_fd(socket_fd) };
+
     if let Some(hostname) = hostname {
         sethostname(&hostname)?;
         debug!("Hostname is now {hostname}");
@@ -61,9 +72,9 @@ fn spawn_with_result(
 
     let user_namespace_created = create_user_namespace();
     debug!("User namespace created {user_namespace_created}, sending to container");
-    sockets::send_bool(socket, user_namespace_created)?;
+    sockets::send_bool(&socket, user_namespace_created)?;
 
-    let uid_and_gid_created = sockets::recv_bool(socket)?;
+    let uid_and_gid_created = sockets::recv_bool(&socket)?;
     if !uid_and_gid_created {
         bail!("BUG: uid_and_gid_created should never be false");
     }
