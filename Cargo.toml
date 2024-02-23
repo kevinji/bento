@@ -6,17 +6,20 @@ authors = ["Kevin Ji"]
 edition = "2021"
 
 [dependencies]
-capctl = "0.2"
-cgroups-rs = "0.3"
+cfg-if = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
-lddtree = "0.3"
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 
-[dependencies.nix]
+[target.'cfg(target_os = "linux")'.dependencies]
+capctl = "0.2"
+cgroups-rs = "0.3"
+lddtree = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies.nix]
 version = "0.27"
 features = ["fs", "hostname", "mount", "sched", "socket", "user"]
 
