@@ -70,6 +70,8 @@ fn spawn_with_result(
         debug!("Hostname is now {hostname}");
     }
 
+    switch_root(&mount_dir)?;
+
     let user_namespace_created = create_user_namespace();
     debug!("User namespace created {user_namespace_created}, sending to container");
     sockets::send_bool(&socket, user_namespace_created)?;
@@ -82,8 +84,6 @@ fn spawn_with_result(
 
     let command = path.to_str().expect("Command must be valid UTF-8");
     info!("Running command {command} with args {argv:?}");
-
-    switch_root(&mount_dir)?;
 
     Ok(execve::<_, CString>(&path, &argv, &[])?)
 }
@@ -112,26 +112,37 @@ fn set_uid(uid: Uid) -> eyre::Result<()> {
     Ok(())
 }
 
-fn mount_dir(
-    path: &Option<PathBuf>,
+fn mount_at_path(
+    path: Option<&PathBuf>,
     mount_point: &PathBuf,
     flags: Vec<MsFlags>,
 ) -> eyre::Result<()> {
-    mount::<_, _, PathBuf, PathBuf>(
-        path.as_ref(),
-        mount_point,
-        None,
-        MsFlags::from_iter(flags),
-        None,
-    )?;
+    debug!("Mounting {mount_point:?} at {path:?} with flags {flags:?}");
+    mount::<_, _, PathBuf, PathBuf>(path, mount_point, None, MsFlags::from_iter(flags), None)?;
     Ok(())
 }
 
 fn switch_root(new_root: &PathBuf) -> eyre::Result<()> {
+    mount_at_path(
+        None,
+        &PathBuf::from("/"),
+        vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE],
+    )?;
+    mount_at_path(
+        Some(new_root),
+        new_root,
+        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
+    )?;
+
     // Avoid creating a temporary dir for the old root:
     // https://man7.org/linux/man-pages/man2/pivot_root.2.html
+    debug!("Running chdir({new_root})", new_root = new_root.display());
     chdir(new_root)?;
+
+    debug!("Running pivot_root(\".\", \".\")");
     pivot_root(".", ".")?;
+
+    debug!("Unmounting old root");
     umount2(".", MntFlags::MNT_DETACH)?;
     Ok(())
 }
