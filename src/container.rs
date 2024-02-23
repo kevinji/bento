@@ -23,12 +23,13 @@ const CGROUP_NAME: &str = "bento";
 
 impl Container {
     pub fn new(
-        command: &str,
+        command: String,
         uid: uid_t,
         mount_dir: PathBuf,
         hostname: Option<String>,
+        commands_to_copy: Vec<String>,
     ) -> eyre::Result<Self> {
-        let config = ContainerConfig::new(command, uid, mount_dir, hostname)?;
+        let config = ContainerConfig::new(command, uid, mount_dir, hostname, commands_to_copy)?;
 
         let cgroup = build_cgroup(CGROUP_NAME)?;
         let (container_socket, child_socket) = UnixDatagram::pair()?;
@@ -108,10 +109,11 @@ pub fn start(
         uid,
         mount_dir,
         hostname,
+        commands_to_copy,
     }: Args,
 ) -> eyre::Result<()> {
-    let mut container =
-        Container::new(&command, uid, mount_dir, hostname).wrap_err("Error creating container")?;
+    let mut container = Container::new(command, uid, mount_dir, hostname, commands_to_copy)
+        .wrap_err("Error creating container")?;
     container.wait_for_child()?;
 
     debug!("Cleaning up container...");

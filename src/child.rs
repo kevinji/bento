@@ -1,5 +1,5 @@
 use crate::{container_config::ContainerConfig, sockets};
-use eyre::{bail, WrapErr};
+use eyre::bail;
 use lddtree::DependencyAnalyzer;
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
@@ -10,6 +10,7 @@ use nix::{
     },
 };
 use std::{
+    collections::HashSet,
     convert::Infallible,
     ffi::CString,
     fs,
@@ -57,15 +58,15 @@ fn spawn(config: ContainerConfig, socket_fd: RawFd) -> isize {
 
 fn spawn_with_result(
     ContainerConfig {
-        path,
+        command,
         argv,
         uid,
         mount_dir,
         hostname,
+        commands_to_copy,
     }: ContainerConfig,
     socket_fd: RawFd,
 ) -> eyre::Result<Infallible> {
-    let command = path.to_str().wrap_err("Command must be valid UTF-8")?;
     let socket = unsafe { UnixDatagram::from_raw_fd(socket_fd) };
 
     if let Some(hostname) = hostname {
@@ -73,7 +74,7 @@ fn spawn_with_result(
         debug!("Hostname is now {hostname}");
     }
 
-    mount_roots_and_paths(&mount_dir, command)?;
+    mount_roots_and_paths(&mount_dir, &command, commands_to_copy)?;
     switch_root(&mount_dir)?;
 
     let user_namespace_created = create_user_namespace();
@@ -87,7 +88,7 @@ fn spawn_with_result(
     set_uid(uid)?;
 
     info!("Running command {command} with args {argv:?}");
-    Ok(execve::<_, CString>(&path, &argv, &[])?)
+    Ok(execve::<_, CString>(&CString::new(command)?, &argv, &[])?)
 }
 
 fn create_user_namespace() -> bool {
@@ -120,7 +121,7 @@ fn mount_at_path(path: Option<&Path>, mount_point: &Path, flags: Vec<MsFlags>) -
     Ok(())
 }
 
-fn get_library_paths(command: &str) -> eyre::Result<Vec<PathBuf>> {
+fn get_library_paths(command: &str) -> eyre::Result<HashSet<PathBuf>> {
     let dependency_analyzer = DependencyAnalyzer::new("/".into());
     let dependency_tree = dependency_analyzer.analyze(command)?;
     Ok(dependency_tree
@@ -130,7 +131,7 @@ fn get_library_paths(command: &str) -> eyre::Result<Vec<PathBuf>> {
         .collect())
 }
 
-fn mkdir_and_copy(new_root: &Path, paths: &[PathBuf]) -> eyre::Result<()> {
+fn mkdir_and_copy(new_root: &Path, paths: &HashSet<PathBuf>) -> eyre::Result<()> {
     for path in paths {
         let stripped_path = path.strip_prefix("/").unwrap_or(path);
         if let Some(new_parent_path) = new_root.join(stripped_path).parent() {
@@ -150,7 +151,11 @@ fn mkdir_and_copy(new_root: &Path, paths: &[PathBuf]) -> eyre::Result<()> {
     Ok(())
 }
 
-fn mount_roots_and_paths(new_root: &Path, command: &str) -> eyre::Result<()> {
+fn mount_roots_and_paths(
+    new_root: &Path,
+    command: &str,
+    mut commands_to_copy: Vec<String>,
+) -> eyre::Result<()> {
     mount_at_path(
         None,
         &PathBuf::from("/"),
@@ -162,9 +167,15 @@ fn mount_roots_and_paths(new_root: &Path, command: &str) -> eyre::Result<()> {
         vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
     )?;
 
-    let mut command_and_lib_paths = get_library_paths(command)?;
-    debug!("Libraries of command: {command_and_lib_paths:?}");
-    command_and_lib_paths.push(command.into());
+    commands_to_copy.push(command.to_owned());
+    let mut command_and_lib_paths = commands_to_copy
+        .iter()
+        .map(PathBuf::from)
+        .collect::<HashSet<_>>();
+    for command in commands_to_copy {
+        command_and_lib_paths.extend(get_library_paths(&command)?);
+    }
+    debug!("Commands and libraries: {command_and_lib_paths:?}");
 
     mkdir_and_copy(new_root, &command_and_lib_paths)?;
 

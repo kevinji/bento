@@ -21,6 +21,10 @@ pub struct Args {
     /// Hostname of the container
     #[clap(long)]
     pub hostname: Option<String>,
+
+    /// Other commands to copy into the container
+    #[clap(long = "copy")]
+    pub commands_to_copy: Vec<String>,
 }
 
 impl Args {
