@@ -1,6 +1,7 @@
 use clap::Parser;
 use nix::libc::uid_t;
 use std::{fs, path::PathBuf};
+use tracing::debug;
 
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -28,6 +29,7 @@ impl Args {
     /// Returns an error if parsing `Args` fails, or creating `mount_dir` fails.
     pub fn try_parse_and_validate() -> eyre::Result<Self> {
         let args = Args::try_parse()?;
+        debug!("Creating dir {}", args.mount_dir.display());
         fs::create_dir_all(&args.mount_dir)?;
 
         Ok(args)

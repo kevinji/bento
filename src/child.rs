@@ -1,5 +1,5 @@
 use crate::{container_config::ContainerConfig, sockets};
-use eyre::bail;
+use eyre::{bail, WrapErr};
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::{clone, unshare, CloneFlags},
@@ -11,6 +11,7 @@ use nix::{
 use std::{
     convert::Infallible,
     ffi::CString,
+    fs,
     os::{
         fd::{FromRawFd, IntoRawFd, RawFd},
         unix::net::UnixDatagram,
@@ -63,6 +64,7 @@ fn spawn_with_result(
     }: ContainerConfig,
     socket_fd: RawFd,
 ) -> eyre::Result<Infallible> {
+    let command = path.to_str().wrap_err("Command must be valid UTF-8")?;
     let socket = unsafe { UnixDatagram::from_raw_fd(socket_fd) };
 
     if let Some(hostname) = hostname {
@@ -70,6 +72,7 @@ fn spawn_with_result(
         debug!("Hostname is now {hostname}");
     }
 
+    mount_roots_and_paths(&mount_dir, command)?;
     switch_root(&mount_dir)?;
 
     let user_namespace_created = create_user_namespace();
@@ -82,9 +85,7 @@ fn spawn_with_result(
     }
     set_uid(uid)?;
 
-    let command = path.to_str().expect("Command must be valid UTF-8");
     info!("Running command {command} with args {argv:?}");
-
     Ok(execve::<_, CString>(&path, &argv, &[])?)
 }
 
@@ -117,12 +118,12 @@ fn mount_at_path(
     mount_point: &PathBuf,
     flags: Vec<MsFlags>,
 ) -> eyre::Result<()> {
-    debug!("Mounting {mount_point:?} at {path:?} with flags {flags:?}");
+    debug!("Mounting {path:?} at {mount_point:?} with flags {flags:?}");
     mount::<_, _, PathBuf, PathBuf>(path, mount_point, None, MsFlags::from_iter(flags), None)?;
     Ok(())
 }
 
-fn switch_root(new_root: &PathBuf) -> eyre::Result<()> {
+fn mount_roots_and_paths(new_root: &PathBuf, command: &str) -> eyre::Result<()> {
     mount_at_path(
         None,
         &PathBuf::from("/"),
@@ -134,6 +135,26 @@ fn switch_root(new_root: &PathBuf) -> eyre::Result<()> {
         vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
     )?;
 
+    // TODO: Remove hardcoded paths
+    let stripped_command = command.strip_prefix("/").unwrap_or(command);
+    if let Some(command_dir) = new_root.join(stripped_command).parent() {
+        debug!("Creating dir {}", command_dir.display());
+        fs::create_dir_all(command_dir)?;
+    }
+    fs::copy(command, new_root.join(stripped_command))?;
+
+    debug!("Creating dir {}", new_root.join("lib").display());
+    fs::create_dir_all(&new_root.join("lib"))?;
+    mount_at_path(
+        Some(&PathBuf::from("/lib")),
+        &new_root.join("lib"),
+        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE, MsFlags::MS_RDONLY],
+    )?;
+
+    Ok(())
+}
+
+fn switch_root(new_root: &PathBuf) -> eyre::Result<()> {
     // Avoid creating a temporary dir for the old root:
     // https://man7.org/linux/man-pages/man2/pivot_root.2.html
     debug!("Running chdir({new_root})", new_root = new_root.display());
